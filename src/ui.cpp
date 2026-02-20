@@ -4,7 +4,16 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
+#include <signal.h>
 #include "../include/reader.hpp"
+
+// global flag set by signal handler
+// setting it to volatile to let compiler know that the value can change outside program flow
+static volatile sig_atomic_t g_resized = 0;
+
+void onResize(int) {
+    g_resized = 1;
+}
 
 // ─────────────────────────────────────────────
 // Panel — base class for all panels
@@ -60,6 +69,101 @@ public:
 
         wnoutrefresh(win); // marking window for update
     }
+
+    // resizing the panel
+    void rebuild(int height, int width, int pos_y, int pos_x) {
+        if (win) {
+            delwin(win);
+        }
+        m_height = height;
+        m_width  = width;
+        m_pos_y  = pos_y;
+        m_pos_x  = pos_x;
+        win = newwin(height, width, pos_y, pos_x);
+    }
+};
+
+// ─────────────────────────────────────────────
+// System Info Panel — displays system info
+// extends Panel class
+// ─────────────────────────────────────────────
+class SystemInfoPanel : public Panel {
+private:
+    void drawVisuals(){
+
+        // os name
+        std::string os_name = getOSName();
+        mvwprintw(win, 2, 1, " %s ", os_name.c_str());
+
+        // time
+        std::string system_time = getOSTime();
+        mvwprintw(win, 4, 1, " %s ", system_time.c_str());
+    }
+
+public:
+    SystemInfoPanel(
+        int height, // height of the panel
+        int width, // width of the panel
+        int y, // y coordinate of the panel
+        int x // x coordinate of the panel
+    )
+    :
+    Panel(
+        "sys_info", // title
+        2, // color pair
+        height,
+        width,
+        y,
+        x) {}
+
+
+    // function to draw system info
+    void drawSysInfo(){
+        // drawing the system info panel first
+        drawPanel();
+
+        // drawing visuals
+        drawVisuals();
+
+        wnoutrefresh(win); // refreshing window (system info panel contents)
+    }
+};
+
+
+// ─────────────────────────────────────────────
+// Procs Panel — displays processes
+// extends Panel class
+// ─────────────────────────────────────────────
+class ProcPanel : public Panel {
+public:
+    ProcPanel(
+        int height, // height of the panel
+        int width, // width of the panel
+        int y, // y coordinate of the panel
+        int x // x coordinate of the panel
+    )
+    :
+    Panel(
+        "proc", // title
+        1, // color pair
+        height,
+        width,
+        y,
+        x) {}
+
+
+    // function to draw proc stats
+    void drawProcStats(){
+        // drawing the proc panel first
+        drawPanel();
+
+        // drawing visuals
+        // drawVisuals();
+
+        wnoutrefresh(win); // refreshing window (proc panel contents)
+
+    }
+
 };
 
 // ─────────────────────────────────────────────
@@ -195,7 +299,7 @@ public:
 
     // function to draw memory stats
     void drawMemStats(){
-        // drawing the cpu panel first
+        // drawing the memory panel first
         drawPanel();
 
         // drawing visuals
@@ -382,6 +486,10 @@ std::vector<int> getTerminalHeightWidth(){
 // ─────────────────────────────────────────────
 void drawUI(){
 
+    signal(SIGWINCH, onResize);
+
+    std::string quit_text = "press 'q' or 'esc' to exit";
+
     int terminal_height = getTerminalHeightWidth()[0];
     int terminal_width = getTerminalHeightWidth()[1];
 
@@ -393,17 +501,81 @@ void drawUI(){
     int cpu_panel_width = terminal_width/2 - 2;
     CPUPanel cpuPanel(cpu_panel_height, cpu_panel_width, 1, 2);
 
+    // initializing system info panel
+    int sys_info_panel_height = static_cast<int>(cpu_panel_height / 2);
+    int sys_info_panel_width = cpu_panel_width;
+    SystemInfoPanel sysInfoPanel(sys_info_panel_height, sys_info_panel_width, 1, sys_info_panel_width + 2);
+
     // initializing mem panel
-    int mem_panel_height =static_cast<int>(cpu_panel_height/2);
+    int mem_panel_height = static_cast<int>(cpu_panel_height / 2) + 1;
     int mem_panel_width = cpu_panel_width;
-    MemPanel memPanel(mem_panel_height, mem_panel_width, 1, cpu_panel_width + 2);
+    MemPanel memPanel(mem_panel_height, mem_panel_width, sys_info_panel_height + 1, cpu_panel_width + 2);
+
+    // initializing proc panel
+    int proc_panel_height = static_cast<int>(terminal_height - cpu_panel_height - 2);
+    int proc_panel_width = terminal_width - 4;
+    ProcPanel procPanel(proc_panel_height, proc_panel_width, cpu_panel_height + 1, 2);
 
 
     while (true){
+
+        // handling resize
+        if (g_resized) {
+            g_resized = 0;
+            endwin();
+            refresh();
+            clear();
+
+            terminal_height = getTerminalHeightWidth()[0];
+            terminal_width  = getTerminalHeightWidth()[1];
+
+            // recalculating dimensions
+            cpu_panel_height = static_cast<int>(getIdleAndBusyTime().size()) + 4;
+            cpu_panel_width  = terminal_width / 2 - 2;
+
+            int sys_info_h = cpu_panel_height / 2;
+            int mem_h = cpu_panel_height / 2 + 1;
+            int proc_h = terminal_height - cpu_panel_height - 2;
+            int proc_w = terminal_width - 4;
+
+            mainPanel.rebuild(terminal_height, terminal_width, 0, 0);
+            cpuPanel.rebuild(cpu_panel_height, cpu_panel_width, 1, 2);
+            sysInfoPanel.rebuild(sys_info_h, cpu_panel_width, 1, cpu_panel_width + 2);
+            memPanel.rebuild(mem_h, cpu_panel_width, sys_info_h + 1, cpu_panel_width + 2);
+            procPanel.rebuild(proc_h, proc_w, cpu_panel_height + 1, 2);
+        }
+
+        // enforcing minimum size
+        if (terminal_height < 64 || terminal_width < 70) {
+            clear();
+            mvprintw(terminal_height / 2, terminal_width / 2 - 15, "Please resize to at least 70x64");
+            refresh();
+
+            // still need to check for quit and wait for resize
+            if (quitVtop()) {
+                break;
+            }
+            usleep(100000);
+            continue; // skipping drawing panels
+        }
+
+
+        // main panel
         mainPanel.drawPanel();
+        mvwprintw(stdscr, terminal_height - 1, (terminal_width - quit_text.length() - 3), " %s ", quit_text.c_str());
+
+        // cpu stats panel
         cpuPanel.getCPUStats();
         cpuPanel.drawCPUStats();
+
+        // system info panel
+        sysInfoPanel.drawSysInfo();
+
+        // memory stats panel
         memPanel.drawMemStats();
+
+        // process list panel
+        procPanel.drawProcStats();
 
         doupdate(); // updating terminal once
 

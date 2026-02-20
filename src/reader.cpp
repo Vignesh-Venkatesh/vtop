@@ -25,12 +25,15 @@ struct MemStat{
     double used_percent;
 };
 
-// get system time
+// // get system time
 std::string getOSTime(){
     std::time_t now = time(NULL);
-    std::string date_time_str = ctime(&now);
-    return date_time_str;
+    std::tm* tm_info = localtime(&now);
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%a %b %d %Y | %H:%M:%S" , tm_info);
+    return std::string(buffer);
 }
+
 
 // getting OS release name
 std::string getOSName(){
