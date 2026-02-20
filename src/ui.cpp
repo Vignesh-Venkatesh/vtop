@@ -62,6 +62,149 @@ public:
     }
 };
 
+// ─────────────────────────────────────────────
+// MemPanel — displays memory utilisation
+// extends Panel class
+// ─────────────────────────────────────────────
+class MemPanel : public Panel{
+private:
+    MemStat m_mem_info;
+    unsigned long long m_active_memory; // truly used memory (green)
+    unsigned long long m_buffer; // buffers (blue)
+    unsigned long long m_cached; // cache (yellow)
+    unsigned long long m_free; // free (space)
+    unsigned long long m_total; // total space
+
+    // function to get memory stats
+    void getMemStats(){
+        m_mem_info = getMemInfo();
+        m_active_memory = m_mem_info.used_kb - m_mem_info.buffers_kb - m_mem_info.cached_kb;
+        m_buffer = m_mem_info.buffers_kb;
+        m_cached = m_mem_info.cached_kb;
+        m_free = m_mem_info.free_kb;
+        m_total = m_mem_info.total_kb;
+    }
+
+    // function to calculate number of bars
+    std::vector<int> calculateBars(int container_width, const unsigned long long& total_memory, const unsigned long long& active_memory, const unsigned long long& buffer, const unsigned long long& cached){
+
+        if (total_memory == 0) {
+            return {0, 0, 0, 0};
+        }
+
+        int active_memory_bars = static_cast<int>(container_width * (static_cast<double>(active_memory) / total_memory));
+        int buffer_memory_bars = static_cast<int>(container_width * (static_cast<double>(buffer) / total_memory));
+        int cached_memory_bars = static_cast<int>(container_width * (static_cast<double>(cached) / total_memory));
+
+        return {active_memory_bars, buffer_memory_bars, cached_memory_bars};
+    }
+
+
+
+    void drawVisuals(){
+        // calculating width of the bar container
+        int bar_container_width = getmaxx(win) - 6;
+
+        // getting memory stats
+        getMemStats();
+
+        // calculating bars
+        std::vector<int> barsCount = calculateBars(bar_container_width, m_total, m_active_memory, m_buffer, m_cached);
+
+        // setting bars
+        std::string active_bars(barsCount[0], '|');
+        std::string buffer_bars(barsCount[1], '|');
+        std::string cached_bars(barsCount[2], '|');
+        // free 'spaces'
+        int used = barsCount[0] + barsCount[1] + barsCount[2];
+        int free_bar_count = bar_container_width - used;
+        std::string free_bars(std::max(0, free_bar_count), ' ');
+
+
+        // drawing the bars
+        mvwprintw(win, 1, 2, "[");
+
+        wattron(win, COLOR_PAIR(1) | A_BOLD);
+        wprintw(win, "%s", active_bars.c_str());
+        wattroff(win, COLOR_PAIR(1) | A_BOLD);
+
+        wattron(win, COLOR_PAIR(4) | A_BOLD);
+        wprintw(win, "%s", buffer_bars.c_str());
+        wattroff(win, COLOR_PAIR(4) | A_BOLD);
+
+        wattron(win, COLOR_PAIR(2) | A_BOLD);
+        wprintw(win, "%s", cached_bars.c_str());
+        wattroff(win, COLOR_PAIR(2) | A_BOLD);
+
+        wprintw(win, "%s", free_bars.c_str());
+
+        wprintw(win, "]");
+
+
+        // drawing usage stats
+        double used_gb  = static_cast<double>(m_mem_info.used_kb)  / (1024 * 1024);
+        double total_gb = static_cast<double>(m_mem_info.total_kb) / (1024 * 1024);
+        mvwprintw(win, 3, 2, "Usage: %.2fG/%.1fG", used_gb, total_gb);
+
+        // active memory
+        double active_gb = static_cast<double>(m_active_memory) / (1024 * 1024);
+        wattron(win, COLOR_PAIR(1) | A_BOLD);
+        mvwprintw(win, 5, 2, "Active:\t");
+        wattroff(win, COLOR_PAIR(1) | A_BOLD);
+        wprintw(win," %.2fG", active_gb);
+
+        // buffer
+        double buffer_gb = static_cast<double>(m_buffer) / (1024 * 1024);
+        wattron(win, COLOR_PAIR(4) | A_BOLD);
+        mvwprintw(win, 6, 2, "Buffer: \t");
+        wattroff(win, COLOR_PAIR(4) | A_BOLD);
+        wprintw(win," %.2fG", buffer_gb);
+
+        // cached memory
+        double cache_gb = static_cast<double>(m_cached) / (1024 * 1024);
+        wattron(win, COLOR_PAIR(2) | A_BOLD);
+        mvwprintw(win, 7, 2, "Cache:\t");
+        wattroff(win, COLOR_PAIR(2) | A_BOLD);
+        wprintw(win," %.2fG", cache_gb);
+
+        // free memory
+        double free_gb = static_cast<double>(m_free) / (1024 * 1024);
+        wattron(win, COLOR_PAIR(8) | A_BOLD);
+        mvwprintw(win, 8, 2, "Free: \t");
+        wattroff(win, COLOR_PAIR(8) | A_BOLD);
+        wprintw(win," %.2fG", free_gb);
+    }
+
+
+public:
+    MemPanel(
+        int height, // height of the panel
+        int width, // width of the panel
+        int y, // y coordinate of the panel
+        int x // x coordinate of the panel
+    )
+    :
+    Panel(
+        "mem", // title
+        5, // color pair
+        height,
+        width,
+        y,
+        x) {}
+
+
+    // function to draw memory stats
+    void drawMemStats(){
+        // drawing the cpu panel first
+        drawPanel();
+
+        // drawing visuals
+        drawVisuals();
+
+        wnoutrefresh(win); // refreshing window (mem panel contents)
+
+    }
+};
 
 // ─────────────────────────────────────────────
 // CPUPanel — displays per-core CPU utilisation
@@ -165,12 +308,13 @@ public:
         // main cpu stat
         if (!delta_results.empty()){
             drawVisual(delta_results[0],2);
+
+            size_t row = 4;
+            for (size_t i=1; i<delta_results.size(); ++i){
+                drawVisual(delta_results[i], row++);
+            }
         }
 
-        size_t row = 4;
-        for (size_t i=1; i<delta_results.size(); ++i){
-            drawVisual(delta_results[i], row++);
-        }
 
         wnoutrefresh(win); // refreshing window (cpu panel contents)
     }
@@ -223,6 +367,7 @@ void initializeColors(){
     init_pair(5, COLOR_MAGENTA, COLOR_BLACK);
     init_pair(6, COLOR_CYAN, COLOR_BLACK);
     init_pair(7, COLOR_WHITE, COLOR_BLACK);
+    init_pair(8, COLOR_BLACK + 8, COLOR_BLACK); // bright black (gray)
 }
 
 std::vector<int> getTerminalHeightWidth(){
@@ -245,15 +390,20 @@ void drawUI(){
 
     // initializing cpu panel
     int cpu_panel_height = static_cast<int>(getIdleAndBusyTime().size()) + 4;
-    int cpu_panel_width = terminal_width/2;
-
+    int cpu_panel_width = terminal_width/2 - 2;
     CPUPanel cpuPanel(cpu_panel_height, cpu_panel_width, 1, 2);
+
+    // initializing mem panel
+    int mem_panel_height =static_cast<int>(cpu_panel_height/2);
+    int mem_panel_width = cpu_panel_width;
+    MemPanel memPanel(mem_panel_height, mem_panel_width, 1, cpu_panel_width + 2);
 
 
     while (true){
         mainPanel.drawPanel();
         cpuPanel.getCPUStats();
         cpuPanel.drawCPUStats();
+        memPanel.drawMemStats();
 
         doupdate(); // updating terminal once
 
