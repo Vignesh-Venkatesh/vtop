@@ -14,6 +14,17 @@ struct CPUStat{
     CPUStat(const std::string& c, unsigned long long b, unsigned long long i, double u) : cpu(c), busy(b), idle(i), cpu_usage_percent(u){}
 };
 
+struct MemStat{
+    unsigned long long total_kb;
+    unsigned long long free_kb;
+    unsigned long long available_kb;
+    unsigned long long buffers_kb;
+    unsigned long long cached_kb;
+    unsigned long long used_kb;
+
+    double used_percent;
+};
+
 // get system time
 std::string getOSTime(){
     std::time_t now = time(NULL);
@@ -51,6 +62,11 @@ std::string getOSName(){
 
     return os_release;
 }
+
+
+// ─────────────────────────────────────────────
+// CPU related functions
+// ─────────────────────────────────────────────
 
 // getting idle and busy times
 std::vector<CPUStat> getIdleAndBusyTime(){
@@ -119,4 +135,52 @@ void displayCPUStat(const std::vector<CPUStat> &results){
     for (size_t i=0; i<results.size(); i++){
         std::cout << "CPU: " << results[i].cpu << "\t\tBusy: " << results[i].busy << "\t\tIdle: " << results[i].idle << "\n";
     }
+}
+
+// ─────────────────────────────────────────────
+// Meminfo related functions
+// ─────────────────────────────────────────────
+
+MemStat getMemInfo(){
+    std::ifstream file("/proc/meminfo");
+    MemStat mem = {0, 0, 0, 0, 0, 0, 0.0};
+
+    if (!file){
+        return mem;
+    }
+
+    std::string line;
+    while (std::getline(file, line)){
+        std::istringstream iss(line);
+        std::string key;
+        unsigned long long value;
+
+        if (!(iss >> key >> value)){
+            continue;
+        }
+
+        if (key == "MemTotal:"){
+            mem.total_kb = value;
+        } else if (key == "MemFree:") {
+            mem.free_kb = value;
+        } else if (key == "MemAvailable:"){
+            mem.available_kb = value;
+        } else if (key == "Buffers:"){
+            mem.buffers_kb = value;
+        } else if (key == "Cached:"){
+            mem.cached_kb = value;
+        }
+
+    }
+
+    mem.used_kb = mem.total_kb - mem.available_kb;
+
+    if (mem.total_kb > 0){
+        mem.used_percent = (static_cast<double>(mem.used_kb)/mem.total_kb) * 100.0;
+    } else {
+        mem.used_percent = 0.0;
+    }
+
+    return mem;
+
 }
