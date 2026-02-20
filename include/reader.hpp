@@ -13,6 +13,7 @@ struct CPUStat{
     CPUStat(const std::string& c, unsigned long long b, unsigned long long i, double u) : cpu(c), busy(b), idle(i), cpu_usage_percent(u){}
 };
 
+std::string getOSTime();
 std::string getOSName();
 std::vector<CPUStat> getIdleAndBusyTime();
 std::vector<CPUStat> calculateDeltaTime(const std::vector<CPUStat> &prevResults, const std::vector<CPUStat> &currResults);

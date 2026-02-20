@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <ctime>
 
 struct CPUStat{
     std::string cpu;
@@ -12,6 +13,13 @@ struct CPUStat{
 
     CPUStat(const std::string& c, unsigned long long b, unsigned long long i, double u) : cpu(c), busy(b), idle(i), cpu_usage_percent(u){}
 };
+
+// get system time
+std::string getOSTime(){
+    std::time_t now = time(NULL);
+    std::string date_time_str = ctime(&now);
+    return date_time_str;
+}
 
 // getting OS release name
 std::string getOSName(){
