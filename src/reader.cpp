@@ -1,9 +1,13 @@
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <unistd.h>
 #include <vector>
 #include <ctime>
+#include <filesystem>
+#include <algorithm>
 
 struct CPUStat{
     std::string cpu;
@@ -25,7 +29,29 @@ struct MemStat{
     double used_percent;
 };
 
-// // get system time
+struct ProcStat{
+    int pid; // process id
+    int ppid; // parent process id
+    std::string process_name; // process name
+    std::string command_name; // full command
+    int threads; // number of threads
+
+    // stats
+    unsigned long utime; // user cpu ticks
+    unsigned long stime; // system cpu ticks
+    unsigned long vsize; // virtual memory (bytes)
+    long rss; // resident pages
+
+    // derived
+    double cpu_percent; // cpu %
+    unsigned long memb_kb; // memb (rss in KB)
+};
+
+// ─────────────────────────────────────────────
+// System related functions
+// ─────────────────────────────────────────────
+
+// get system time
 std::string getOSTime(){
     std::time_t now = time(NULL);
     std::tm* tm_info = localtime(&now);
@@ -186,4 +212,134 @@ MemStat getMemInfo(){
 
     return mem;
 
+}
+
+// ─────────────────────────────────────────────
+// Proc related functions
+// ─────────────────────────────────────────────
+
+std::vector<std::string> procDirectories;
+
+// listing directories in /proc/
+void listProcDirectories(){
+    procDirectories.clear();
+
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")){
+
+        // skip if not a directory
+        if (!entry.is_directory()){
+            continue;
+        }
+
+        // converting directory name to string
+        std::string dirname = entry.path().filename().string();
+
+        if (!dirname.empty() && std::all_of(dirname.begin(), dirname.end(), ::isdigit)){
+            procDirectories.push_back(dirname);
+        }
+    }
+}
+
+int listNumberOfProcDirectories(){
+    listProcDirectories();
+    return procDirectories.size();
+}
+
+bool readProcStat(const std::string &pid, ProcStat& ps){
+    std::string path = "/proc/" + pid + "/stat";
+    std::ifstream file(path);
+
+    if (!file){
+        return false;
+    }
+
+    std::string line;
+    std::getline(file, line);
+
+    // finding parenthesis
+    size_t open = line.find('(');
+    size_t close = line.rfind(')');
+
+    if (open == std::string::npos || close == std::string::npos){
+        return false;
+    }
+
+    // everything before '(' is pid
+    ps.pid = std::stoi(line.substr(0, open));
+
+    // between parenthesis is the process name
+    ps.process_name = line.substr(open+1, close-open-1);
+
+    // remaining fields
+    std::istringstream iss(line.substr(close + 2));
+
+    char state;
+    iss >> state; // state
+    iss >> ps.ppid; // parent process id
+
+    // skipping unwanted fields
+    unsigned long long skip;
+    iss >> skip >> skip >> skip >> skip >> skip >> skip >> skip >> skip >> skip;
+
+    // utime and stime
+    iss >> ps.utime >> ps.stime;
+
+    // skipping unwanted fields again
+    iss >> skip >> skip >> skip >> skip;
+
+    // thread count
+    iss >> ps.threads;
+
+    // skipping unwanted fields yet again;
+    iss >> skip >> skip;
+
+    // vsize and rss
+    iss >> ps.vsize >> ps.rss;
+
+    // convering rss pages to KB
+    long page_size_kb = sysconf(_SC_PAGE_SIZE)/1024;
+    ps.memb_kb = ps.rss + page_size_kb;
+
+    return true;
+
+}
+
+std::string readCmdLine(const std::string &pid){
+    std::ifstream file("/proc/" + pid + "/cmdline");
+    if (!file){
+        return "";
+    }
+
+    std::string cmdline;
+    std::getline(file, cmdline);
+    if (cmdline.empty()){
+        return "";
+    }
+
+    // replacing arguments separated by null bytes with spaces
+    std::replace(cmdline.begin(), cmdline.end(), '\0', ' ');
+
+    return cmdline;
+}
+
+
+std::vector<ProcStat> getProcStats(){
+    listProcDirectories();
+
+    std::vector<ProcStat> procs;
+
+    for (const auto& pid: procDirectories){
+        ProcStat ps{}; // initializing struct
+        if (!readProcStat(pid, ps)){
+            continue;
+        }
+        ps.command_name = readCmdLine(pid);
+        procs.push_back(ps);
+    }
+
+    std::sort(procs.begin(), procs.end(), [](const ProcStat& a, const ProcStat& b){
+        return a.memb_kb > b.memb_kb;
+    });
+
+    return procs;
 }

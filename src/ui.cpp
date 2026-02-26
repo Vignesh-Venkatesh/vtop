@@ -98,6 +98,10 @@ private:
         // time
         std::string system_time = getOSTime();
         mvwprintw(win, 4, 1, " %s ", system_time.c_str());
+
+        // number of processes
+        int num_procs = listNumberOfProcDirectories();
+        mvwprintw(win, 6, 1, " Total number of processes: %d ", num_procs);
     }
 
 public:
@@ -135,6 +139,64 @@ public:
 // extends Panel class
 // ─────────────────────────────────────────────
 class ProcPanel : public Panel {
+private:
+    std::vector<ProcStat> m_procs;
+    int m_page = 0;
+
+    void drawVisuals(){
+        int win_width = getmaxx(win);
+
+        // column header
+        wattron(win, A_BOLD | COLOR_PAIR(7));
+        mvwprintw(win, 1, 2, "%-6s %-20s %-6s %-10s %s", "PID", "NAME", "THR", "MEM(KB)", "COMMAND");
+        wattroff(win, A_BOLD | COLOR_PAIR(7));
+
+        // divider
+        mvwprintw(win, 2, 2, "%s", std::string(win_width - 4, '-').c_str());
+
+
+        int max_rows = m_height - 4;
+        int start = m_page * max_rows;
+        int end = std::min(start + max_rows, static_cast<int>(m_procs.size()));
+        int row = 3;
+
+
+        for (int i = start; i<end; i++){
+            const ProcStat &p = m_procs[i];
+
+            // truncating command to fit in remaining width
+            // 2 margin + 6pid + 1 + 20 name + 1 + 6 thr + 1 + 10 mem + 1 + 2 margin
+            std::string cmd = p.command_name.empty() ? p.process_name : p.command_name;
+            int cmd_max = win_width - 50;
+            if (cmd_max>0 && static_cast<int>(cmd.size())>cmd_max){
+                cmd = cmd.substr(0, cmd_max);
+            }
+
+
+            // adding color based on memory usage
+            int color;
+            if (p.memb_kb>500000){
+                color = 3; // red - 500MB
+            } else if (p.memb_kb > 100000) {
+                color = 2; // yellow - 100MB
+            }
+            // else {
+            //     color = 1;
+            // }
+
+            // drawing the row
+            mvwhline(win, row, 2, ' ', win_width - 4); // clearing row
+            wattron(win, COLOR_PAIR(color));
+            mvwprintw(win, row++, 2, "%-6d %-20.20s %-6d %-10lu %s", p.pid, p.process_name.c_str(), p.threads, p.memb_kb, cmd.c_str());
+            wattroff(win, COLOR_PAIR(color));
+        }
+
+        // page indicator at the bottom
+        int total_pages = (static_cast<int>(m_procs.size()) + max_rows - 1)/max_rows;
+        mvwprintw(win, m_height-1, 2, "page %d/%d", m_page+1, total_pages);
+    }
+
+
 public:
     ProcPanel(
         int height, // height of the panel
@@ -154,14 +216,32 @@ public:
 
     // function to draw proc stats
     void drawProcStats(){
+        m_procs = getProcStats();
+
         // drawing the proc panel first
         drawPanel();
 
         // drawing visuals
-        // drawVisuals();
+        drawVisuals();
 
         wnoutrefresh(win); // refreshing window (proc panel contents)
 
+    }
+
+    void changePage(int direction){
+        m_page += direction;
+
+        // restricting to valid range
+        int max_rows = m_height - 4;
+        int total_pages = (static_cast<int>(m_procs.size()) + max_rows - 1)/max_rows;
+
+        if (m_page < 0){
+            m_page = 0;
+        }
+
+        if (m_page >= total_pages){
+            m_page = total_pages -1;
+        }
     }
 
 };
@@ -413,6 +493,8 @@ public:
         if (!delta_results.empty()){
             drawVisual(delta_results[0],2);
 
+            mvwprintw(win, 3, 2, "%s", std::string(getmaxx(win) - 4, '-').c_str());
+
             size_t row = 4;
             for (size_t i=1; i<delta_results.size(); ++i){
                 drawVisual(delta_results[i], row++);
@@ -437,16 +519,24 @@ public:
 // Helpers
 // ─────────────────────────────────────────────
 
-// function to quit the program
-bool quitVtop(){
+// function to handle program inputs
+int handleInput(ProcPanel &procPanel){
     int ch = getch();
 
     // user pressed 'q' or 'esc'
     if (ch == 'q' || ch == 27){
-        return true;
+        return -1;
     }
 
-    return false;
+    // changing proc page
+    if (ch == KEY_RIGHT){
+        procPanel.changePage(1);
+    }
+    if (ch == KEY_LEFT){
+        procPanel.changePage(-1);
+    }
+
+    return 0;
 }
 
 
@@ -546,13 +636,13 @@ void drawUI(){
         }
 
         // enforcing minimum size
-        if (terminal_height < 64 || terminal_width < 70) {
+        if (terminal_height < 30 || terminal_width < 70) {
             clear();
-            mvprintw(terminal_height / 2, terminal_width / 2 - 15, "Please resize to at least 70x64");
+            mvprintw(terminal_height / 2, terminal_width / 2 - 15, "Please resize to at least 70x30");
             refresh();
 
             // still need to check for quit and wait for resize
-            if (quitVtop()) {
+            if (handleInput(procPanel) == -1) {
                 break;
             }
             usleep(100000);
@@ -580,7 +670,7 @@ void drawUI(){
         doupdate(); // updating terminal once
 
         // quit vtop
-        if (quitVtop()){
+        if (handleInput(procPanel) == -1){
             break;
         }
     }
@@ -588,6 +678,7 @@ void drawUI(){
 
 void draw(){
     initscr(); // initializing screen
+    keypad(stdscr, TRUE); // keypad inputs
     curs_set(0); // hiding the cursor
     nodelay(stdscr, TRUE); // non-blocking input
     initializeColors(); // initializing colors

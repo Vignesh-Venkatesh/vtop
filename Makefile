@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -Wextra -O2
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2
 LDFLAGS = -lncursesw
 
 SRC_DIR = src
@@ -13,6 +13,10 @@ all: $(TARGET)
 $(TARGET): $(SRC_FILES)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC_FILES) $(LDFLAGS)
+
+debug: 
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -g -o $(TARGET) $(SRC_FILES) $(LDFLAGS)
 
 run: $(TARGET)
 	./$(TARGET)
